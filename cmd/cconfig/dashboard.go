@@ -30,7 +30,7 @@ func cmdDashboard(argv []string) (err error) {
 	usage := `usage: codis-config dashboard [--addr=<address>] [--http-log=<log_file>]
 
 options:
-	--addr	listen ip:port, e.g. localhost:12345, :8086, [default: :8086]
+	--addr	listen ip:port, e.g. localhost:18087, :18087, [default: :18087]
 	--http-log	http request log [default: request.log ]
 `
 
@@ -46,7 +46,7 @@ options:
 		logFileName = args["--http-log"].(string)
 	}
 
-	addr := ":8086"
+	addr := ":18087"
 	if args["--addr"] != nil {
 		addr = args["--addr"].(string)
 	}
@@ -120,22 +120,6 @@ func getAllProxyDebugVars() map[string]map[string]interface{} {
 	return ret
 }
 
-func getProxySpeedChan() <-chan int64 {
-	c := make(chan int64)
-	go func() {
-		var lastCnt int64
-		for {
-			cnt := getAllProxyOps()
-			if lastCnt > 0 {
-				c <- cnt - lastCnt
-			}
-			lastCnt = cnt
-			time.Sleep(1 * time.Second)
-		}
-	}()
-	return c
-}
-
 func pageSlots(r render.Render) {
 	r.HTML(200, "slots", nil)
 }
@@ -157,7 +141,10 @@ func createDashboardNode() error {
 	pathCreated, err := safeZkConn.Create(zkPath, []byte(content), 0, zkhelper.DefaultFileACLs())
 	createdDashboardNode = true
 	log.Infof("dashboard node created: %v, %s", pathCreated, string(content))
-
+	log.Warn("********** Attention **********")
+	log.Warn("You should use `kill {pid}` rather than `kill -9 {pid}` to stop me,")
+	log.Warn("or the node resisted on zk will not be cleaned when I'm quiting and you must remove it manually")
+	log.Warn("*******************************")
 	return errors.Trace(err)
 }
 
@@ -251,9 +238,17 @@ func runDashboard(addr string, httpLogFile string) {
 	globalMigrateManager = NewMigrateManager(safeZkConn, globalEnv.ProductName())
 
 	go func() {
-		c := getProxySpeedChan()
-		for {
-			atomic.StoreInt64(&proxiesSpeed, <-c)
+		tick := time.Tick(time.Second)
+		var lastCnt, qps int64
+		for _ = range tick {
+			cnt := getAllProxyOps()
+			if cnt > 0 {
+				qps = cnt - lastCnt
+				lastCnt = cnt
+			} else {
+				qps = 0
+			}
+			atomic.StoreInt64(&proxiesSpeed, qps)
 		}
 	}()
 

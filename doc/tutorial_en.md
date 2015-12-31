@@ -20,21 +20,18 @@ Codis support namespace, configs of products with different name  won’t be con
 
 ## Build codis-proxy & codis-config
 
-Install Go please check [this document](https://github.com/astaxie/build-web-application-with-golang/blob/master/ebook/01.1.md). Then follow these hints:
 
-```
-go get -d github.com/wandoulabs/codis
-cd $GOPATH/src/github.com/wandoulabs/codis
-./bootstrap.sh
-make gotest
-```
+* install go [see official doc](https://golang.org/doc/install)
+* set $GOPATH correctly and set PATH=$GOPATH/bin:$PATH to execute commands installed by `go get`
+* execute `go get -u -d github.com/wandoulabs/codis` to download codis
+* change directory to `$GOPATH/src/github.com/wandoulabs/codis` and execute `make` to compile, execute `make gotest` to run unit test
 
 Two executable file `codas-config` and `codis-proxy` should be generated in `codis/bin`(`bin/assets` is the resources for `codis-config` dashboard, should be placed at same directory with `codis-config`).
 
 ```
 cd sample
 
-$ ../bin/codis-config -h                                                                                                                                                                                                                           (master)
+$ bin/codis-config -h                                                                                                                                                                                                                           (master)
 usage: codis-config  [-c <config_file>] [-L <log_file>] [--log-level=<loglevel>]
         <command> [<args>...]
 options:
@@ -51,7 +48,7 @@ commands:
 ```
 
 ```
-$ ../bin/codis-proxy -h
+$ bin/codis-proxy -h
 
 usage: proxy [-c <config_file>] [-L <log_file>] [--log-level=<loglevel>] [--cpu=<cpu_num>] [--addr=<proxy_listen_addr>] [--http-addr=<debug_http_server_addr>]
 
@@ -67,19 +64,9 @@ options:
 ## Deploy
 
 ### Configuration file
-
 `codis-config` and `codis-proxy` will take `config.ini` in current directory by default without a specific `-c`.
 
-`config.ini`:
-
-```
-zk=localhost:2181   <- Location of `zookeeper`, use `zk=hostname1:2181,hostname2:2181,hostname3:2181,hostname4:2181,hostname5:2181` for `zookeeper` clusters.
-`zk=http://hostname1:2181,http://hostname2:2181,http://hostname3:2181 for `etcd` clusters.
-product=test        <- Product name, also the name of this Coids clusters, can be considered as namespace, Codis with different names have no intersection. 
-proxy_id=proxy_1    <- Proxy will take this as identifier for proxy, multiple proxy can use different `config.ini` with various `proxy_id`.
-dashboard_addr=localhost:18087  <- dashboard provides the RESTful API for CLI
-coordinator=zookeeper  <-replace zookeeper to etcd if you are using etcd.
-```
+See [config.ini](https://github.com/wandoulabs/codis/blob/master/config.ini)'s comments.
 
 ### Workflow
 0. Execute `codis-config dashboard` , start dashboard.
@@ -88,7 +75,7 @@ coordinator=zookeeper  <-replace zookeeper to etcd if you are using etcd.
 3. Add Redis server group, each server group as a Redis server group, only one master is allowed while could have multiple slaves. Group id only support integer lager than 1.
 
 ```
-$ ../bin/codis-config server -h
+$ bin/codis-config server -h
 usage:
     codis-config server list
     codis-config server add <group_id> <redis_addr> <role>
@@ -103,20 +90,20 @@ For example: Add two server group with the ids of 1 and 2, each has two Redis in
 First, add a group with id of 1 and assign a Redis master to it:
 
 ```
-$ ./codis-config server add 1 localhost:6379 master
+$ bin/codis-config server add 1 localhost:6379 master
 ```
 
 Second, assign a Redis slave to this group:
 
 ```
-$ ./codis-config server add 1 localhost:6380 slave
+$ bin/codis-config server add 1 localhost:6380 slave
 ```
 
 Then the group with id of 2:
 
 ```
-$ ./codis-config server add 2 localhost:6479 master
-$ ./codis-config server add 2 localhost:6480 slave
+$ bin/codis-config server add 2 localhost:6479 master
+$ bin/codis-config server add 2 localhost:6480 slave
 ```
 
 4. Config slot range of server group
@@ -124,7 +111,7 @@ $ ./codis-config server add 2 localhost:6480 slave
 Codes implement data segmentation with Pre-sharding mechanism, 1024 slots will be segmented by default,a single key use following formula to determine which slot to resident, each slot has a server group id represents the server group which will provide service.
 
 ```
-$ ./codis-config slot -h                                                                                                                                                                                                                     
+$ bin/codis-config slot -h                                                                                                                                                                                                                     
 usage:
     codis-config slot init
     codis-config slot info <slot_id>
@@ -136,20 +123,20 @@ usage:
 For exmaple, config server group 1 provide service for slot [0, 511], server group 2 provide service for slot [512, 1023]
 
 ```
-$ ./codis-config slot range-set 0 511 1 online
-$ ./codis-config slot range-set 512 1023 2 online
+$ bin/codis-config slot range-set 0 511 1 online
+$ bin/codis-config slot range-set 512 1023 2 online
 ```
 
 5. Start `codis-proxy`
 
 ```
-../bin/codis-proxy -c config.ini -L ./log/proxy.log  --cpu=8 --addr=0.0.0.0:19000 --http-addr=0.0.0.0:11000
+  bin/codis-proxy -c config.ini -L ./log/proxy.log  --cpu=8 --addr=0.0.0.0:19000 --http-addr=0.0.0.0:11000
 ```
 
 `codas-proxy`’s status are now `offline`, put it `online` to provide service:
 
 ```
- ../bin/codis-config -c config.ini proxy online <proxy_name>  <---- proxy id, e.g. proxy_1
+ bin/codis-config -c config.ini proxy online <proxy_name>  <---- proxy id, e.g. proxy_1
 ```
 
 6. Open http://localhost:18087/admin in browser
@@ -165,7 +152,7 @@ The minimum data migration unit is `key`, we add some specific actions—such as
 For example: migrate data in slot with ID from 0 to 511 to server group 2, `--delay` is the sleep duration after each transportation of record, which is used to limit speed, default value is 0. 
 
 ```
-$ ../bin/codis-config slot migrate 0 511 2 --delay=10
+$ bin/codis-config slot migrate 0 511 2 --delay=10
 ```
 
 Migration progress is reliable and transparent, data won’t vanish and top layer application won’t terminate service. 
@@ -177,7 +164,7 @@ Notice that migration task could be paused, but if there is a paused task, it mu
 Codis support dynamic slots migration based on RAM usage to balance data distribution.
  
 ```
-$../bin/codis-config slot rebalance
+$bin/codis-config slot rebalance
 ```
 
 Requirements:
@@ -190,7 +177,8 @@ Requirements:
 
 Codis's proxy is stateless so you can run more than one proxies to get high availability and horizontal scalability.
 
-For Java users, you can use a modified jedis, [Jodis](https://github.com/wandoulabs/codis/tree/master/extern/jodis). It will watch the ZooKeeper to get the real-time available proxies, then query via them using a round robin policy to balance load and detect proxy online and offline automatically.
+For Java users, you can use a modified Jedis, [Jodis](https://github.com/wandoulabs/jodis). It will watch the ZooKeeper to get the real-time available proxies, then query via them using a round robin policy to balance load and detect proxy online and offline automatically.
+If asynchronous request is required, you can use [Nedis](https://github.com/wandoulabs/nedis) which is implemented based on Netty.
 
 For redis instances, the designers of codis think when a master down, system administrator should know about it and promote a slave to master by hand, not automatically. Because a crashed master may result in the data in this group not consistent.
 But we also offer a solution: [codis-ha](https://github.com/ngaut/codis-ha)。It is a tool using codis rest api to promote a slave to master when it find the master down.

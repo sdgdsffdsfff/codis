@@ -25,12 +25,11 @@ type Session struct {
 	LastOpUnix int64
 	CreateUnix int64
 
-	passwd     string
+	auth       string
 	authorized bool
 
 	quit   bool
 	failed atomic2.Bool
-	closed atomic2.Bool
 }
 
 func (s *Session) String() string {
@@ -47,12 +46,12 @@ func (s *Session) String() string {
 	return string(b)
 }
 
-func NewSession(c net.Conn, passwd string) *Session {
-	return NewSessionSize(c, passwd, 1024*32, 1800)
+func NewSession(c net.Conn, auth string) *Session {
+	return NewSessionSize(c, auth, 1024*32, 1800)
 }
 
-func NewSessionSize(c net.Conn, passwd string, bufsize int, timeout int) *Session {
-	s := &Session{CreateUnix: time.Now().Unix(), passwd: passwd}
+func NewSessionSize(c net.Conn, auth string, bufsize int, timeout int) *Session {
+	s := &Session{CreateUnix: time.Now().Unix(), auth: auth}
 	s.Conn = redis.NewConnSize(c, bufsize)
 	s.Conn.ReaderTimeout = time.Second * time.Duration(timeout)
 	s.Conn.WriterTimeout = time.Second * 30
@@ -61,13 +60,7 @@ func NewSessionSize(c net.Conn, passwd string, bufsize int, timeout int) *Sessio
 }
 
 func (s *Session) Close() error {
-	s.failed.Set(true)
-	s.closed.Set(true)
 	return s.Conn.Close()
-}
-
-func (s *Session) IsClosed() bool {
-	return s.closed.Get()
 }
 
 func (s *Session) Serve(d Dispatcher, maxPipeline int) {
@@ -78,18 +71,19 @@ func (s *Session) Serve(d Dispatcher, maxPipeline int) {
 		} else {
 			log.Infof("session [%p] closed: %s, quit", s, s)
 		}
+		s.Close()
 	}()
 
 	tasks := make(chan *Request, maxPipeline)
 	go func() {
 		defer func() {
-			s.Close()
 			for _ = range tasks {
 			}
 		}()
 		if err := s.loopWriter(tasks); err != nil {
 			errlist.PushBack(err)
 		}
+		s.Close()
 	}()
 
 	defer close(tasks)
@@ -184,7 +178,7 @@ func (s *Session) handleRequest(resp *redis.Resp, d Dispatcher) (*Request, error
 	}
 
 	if !s.authorized {
-		if s.passwd != "" {
+		if s.auth != "" {
 			r.Response.Resp = redis.NewError([]byte("NOAUTH Authentication required."))
 			return r, nil
 		}
@@ -217,11 +211,11 @@ func (s *Session) handleAuth(r *Request) (*Request, error) {
 		r.Response.Resp = redis.NewError([]byte("ERR wrong number of arguments for 'AUTH' command"))
 		return r, nil
 	}
-	if s.passwd == "" {
+	if s.auth == "" {
 		r.Response.Resp = redis.NewError([]byte("ERR Client sent AUTH, but no password is set"))
 		return r, nil
 	}
-	if s.passwd != string(r.Resp.Array[1].Value) {
+	if s.auth != string(r.Resp.Array[1].Value) {
 		s.authorized = false
 		r.Response.Resp = redis.NewError([]byte("ERR invalid password"))
 		return r, nil
@@ -233,11 +227,27 @@ func (s *Session) handleAuth(r *Request) (*Request, error) {
 }
 
 func (s *Session) handleSelect(r *Request) (*Request, error) {
-	r.Response.Resp = redis.NewString([]byte("OK"))
-	return r, nil
+	if len(r.Resp.Array) != 2 {
+		r.Response.Resp = redis.NewError([]byte("ERR wrong number of arguments for 'SELECT' command"))
+		return r, nil
+	}
+	if db, err := strconv.Atoi(string(r.Resp.Array[1].Value)); err != nil {
+		r.Response.Resp = redis.NewError([]byte("ERR invalid DB index"))
+		return r, nil
+	} else if db != 0 {
+		r.Response.Resp = redis.NewError([]byte("ERR invalid DB index, only accept DB 0"))
+		return r, nil
+	} else {
+		r.Response.Resp = redis.NewString([]byte("OK"))
+		return r, nil
+	}
 }
 
 func (s *Session) handlePing(r *Request) (*Request, error) {
+	if len(r.Resp.Array) != 1 {
+		r.Response.Resp = redis.NewError([]byte("ERR wrong number of arguments for 'PING' command"))
+		return r, nil
+	}
 	r.Response.Resp = redis.NewString([]byte("PONG"))
 	return r, nil
 }
@@ -290,7 +300,7 @@ func (s *Session) handleRequestMSet(r *Request, d Dispatcher) (*Request, error) 
 		return r, d.Dispatch(r)
 	}
 	if nblks%2 != 0 {
-		r.Response.Resp = redis.NewError([]byte("ERR wrong number of arguments for MSET"))
+		r.Response.Resp = redis.NewError([]byte("ERR wrong number of arguments for 'MSET' command"))
 		return r, nil
 	}
 	var sub = make([]*Request, nblks/2)

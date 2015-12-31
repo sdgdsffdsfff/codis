@@ -153,6 +153,9 @@ func (self *ServerGroup) Remove(zkConn zkhelper.Conn) error {
 		if slot.GroupId == self.Id {
 			return errors.Errorf("group %d is using by slot %d", slot.GroupId, slot.Id)
 		}
+		if (slot.State.Status == SLOT_STATUS_MIGRATE || slot.State.Status == SLOT_STATUS_PRE_MIGRATE) && slot.State.MigrateStatus.From == self.Id {
+			return errors.Errorf("slot %d has residual data remain in group %d", slot.Id, self.Id)
+		}
 	}
 
 	// do delete
@@ -254,12 +257,6 @@ func (self *ServerGroup) Create(zkConn zkhelper.Conn) error {
 		return errors.Trace(err)
 	}
 
-	// set no server slots' group id to this server group, no need to return error
-	slots, err := NoGroupSlots(zkConn, self.ProductName)
-	if err == nil && len(slots) > 0 {
-		SetSlots(zkConn, self.ProductName, slots, self.Id, SLOT_STATUS_ONLINE)
-	}
-
 	return nil
 }
 
@@ -305,6 +302,9 @@ func (self *ServerGroup) AddServer(zkConn zkhelper.Conn, s *Server, passwd strin
 
 	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d/%s", self.ProductName, self.Id, s.Addr)
 	_, err = zkhelper.CreateOrUpdate(zkConn, zkPath, string(val), 0, zkhelper.DefaultFileACLs(), true)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// update servers
 	servers, err = self.GetServers(zkConn)

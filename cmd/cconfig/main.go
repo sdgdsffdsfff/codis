@@ -7,19 +7,18 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
-	_ "net/http/pprof"
-
 	"github.com/c4pt0r/cfg"
 	"github.com/docopt/docopt-go"
 
-	"github.com/wandoulabs/codis/pkg/utils"
 	"github.com/wandoulabs/codis/pkg/utils/errors"
 	"github.com/wandoulabs/codis/pkg/utils/log"
+	"github.com/wandoulabs/codis/pkg/utils"
 )
 
 // global objects
@@ -106,7 +105,7 @@ func main() {
 		log.Panicf("ctrl-c or SIGTERM found, exit")
 	}()
 
-	args, err := docopt.Parse(usage, nil, true, "codis config v0.1", true)
+	args, err := docopt.Parse(usage, nil, true, utils.Version, true)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -132,18 +131,15 @@ func main() {
 
 	// set config file
 	var configFile string
-	var config *cfg.Cfg
 	if args["-c"] != nil {
 		configFile = args["-c"].(string)
-		config, err = utils.InitConfigFromFile(configFile)
-		if err != nil {
-			log.PanicErrorf(err, "load config file error")
-		}
 	} else {
-		config, err = utils.InitConfig()
-		if err != nil {
-			log.PanicErrorf(err, "load config file error")
-		}
+		configFile = "config.ini"
+	}
+	config := cfg.NewCfg(configFile)
+
+	if err := config.Load(); err != nil {
+		log.PanicErrorf(err, "load config file error")
 	}
 
 	// load global vars
